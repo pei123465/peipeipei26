@@ -1,36 +1,35 @@
-| 分類       | 項目                    | 設定 / 結論                          | 理由・補足                     |
-| -------- | --------------------- | -------------------------------- | ------------------------- |
-| 全体       | 構成方針                  | DataSync + S3 Interface Endpoint | オンプレから S3 へプライベート通信       |
-| 全体       | インターネット経由             | 不要                               | PrivateLink を使用           |
-| Agent    | 配置場所                  | オンプレミス（専用VM）                     | 既存サーバにインストール不可            |
-| Agent    | セキュリティグループ            | 不要                               | SG は AWS リソース専用           |
-| Agent    | 使用ポート（送信元）            | TCP 1024–1064                    | DataSync Agent 固有仕様       |
-| Agent    | SMB 認証                | NTLM / Kerberos                  | NTLM が簡単、Kerberos は AD 必須 |
-| DNS      | オンプレ DNS 変更           | 不可                               | 前提条件                      |
-| DNS      | S3 Interface Endpoint | **Private DNS：有効（必須）**           | DNS を触れないため               |
-| DNS      | DataSync Endpoint     | **Private DNS：有効（必須）**           | Agent 登録・制御通信に必要          |
-| DNS      | hosts での対応            | 不可                               | CNAME 不可、IP 固定は非推奨        |
-| DNS      | Private DNS 無効時       | 構成不成立                            | Endpoint に誘導できない          |
-| Endpoint | S3 Endpoint 種別        | Interface Endpoint               | オンプレから利用可能                |
-| Endpoint | Gateway Endpoint      | 使用不可                             | オンプレ非対応                   |
-| Endpoint | Endpoint SG Inbound   | TCP 443 from オンプレCIDR            | Agent → Endpoint 通信       |
-| Endpoint | Endpoint SG Outbound  | 全許可                              | 制御・戻り通信のため                |
-| FW（オンプレ） | Outbound（必須）          | TCP 443 → DataSync EP / S3 EP    | 制御通信・データ通信                |
-| FW（オンプレ） | Outbound（必須）          | TCP 445 → バックアップサーバ              | SMB 読み取り                  |
-| FW（オンプレ） | Inbound               | 原則不要                             | Agent は待ち受けしない            |
-| FW（オンプレ） | Inbound（例外）           | TCP 1024–1064                    | 厳格FWで戻り通信を許可する場合          |
-| ロケーション   | 作成数                   | 2                                | SMB（送信元）＋ S3（送信先）         |
-| ロケーション   | S3 複数                 | S3 ロケーションは送信先ごと                  | バケット/プレフィックス単位            |
-| IAM      | IAMロール                | DataSync 用に1つ作成                  | S3 ロケーション用                |
-| IAM      | S3 権限                 | PutObject / ListBucket 等         | 最小権限                      |
-| KMS      | CMK 使用                | IAM + KMSポリシー両方必要                | root 許可だけでは不足             |
-| KMS      | 推奨                    | ロールを明示的に許可                       | トラブル防止                    |
-| S3       | バケット数                 | 基本 1                             | Lifecycle で Glacier 移行    |
-| S3       | バージョニング               | 有効                               | Object Lock 前提            |
-| S3       | Object Lock           | 有効（Governance）                   | 実務向け                      |
-| S3       | Compliance モード        | 使用しない                            | 運用不可になるリスク                |
-| S3       | Retention             | オブジェクト単位                         | 後付け（Lambda 等）             |
-| S3       | Retention 未設定         | ロックされない                          | Object Lock は効かない         |
-| S3       | ライフサイクル               | Standard → Glacier               | コスト最適化                    |
-| トラブル     | Agent→Endpoint通信なし    | Outbound 443 / DNS が原因           | フローログで判別可能                |
-| トラブル     | Endpoint→Agentのみログあり  | Agent側アウトバウンド遮断                  | 典型障害パターン                  |
+分類	項目	設定 / 結論	理由・補足
+全体	構成方針	DataSync + S3 Interface Endpoint	オンプレから S3 へプライベート通信
+全体	インターネット経由	不要	PrivateLink を使用
+Agent	配置場所	オンプレミス（専用VM）	既存サーバにインストール不可
+Agent	セキュリティグループ	不要	SG は AWS リソース専用
+Agent	使用ポート（送信元）	TCP 1024–1064	DataSync Agent 固有仕様
+Agent	SMB 認証	NTLM / Kerberos	NTLM が簡単、Kerberos は AD 必須
+DNS	オンプレ DNS 変更	不可	前提条件
+DNS	S3 Interface Endpoint	Private DNS：有効（必須）	DNS を触れないため
+DNS	DataSync Endpoint	Private DNS：有効（必須）	Agent 登録・制御通信に必要
+DNS	hosts での対応	不可	CNAME 不可、IP 固定は非推奨
+DNS	Private DNS 無効時	構成不成立	Endpoint に誘導できない
+Endpoint	S3 Endpoint 種別	Interface Endpoint	オンプレから利用可能
+Endpoint	Gateway Endpoint	使用不可	オンプレ非対応
+Endpoint	Endpoint SG Inbound	TCP 443 from オンプレCIDR	Agent → Endpoint 通信
+Endpoint	Endpoint SG Outbound	全許可	制御・戻り通信のため
+FW（オンプレ）	Outbound（必須）	TCP 443 → DataSync EP / S3 EP	制御通信・データ通信
+FW（オンプレ）	Outbound（必須）	TCP 445 → バックアップサーバ	SMB 読み取り
+FW（オンプレ）	Inbound	原則不要	Agent は待ち受けしない
+FW（オンプレ）	Inbound（例外）	TCP 1024–1064	厳格FWで戻り通信を許可する場合
+ロケーション	作成数	2	SMB（送信元）＋ S3（送信先）
+ロケーション	S3 複数	S3 ロケーションは送信先ごと	バケット/プレフィックス単位
+IAM	IAMロール	DataSync 用に1つ作成	S3 ロケーション用
+IAM	S3 権限	PutObject / ListBucket 等	最小権限
+KMS	CMK 使用	IAM + KMSポリシー両方必要	root 許可だけでは不足
+KMS	推奨	ロールを明示的に許可	トラブル防止
+S3	バケット数	基本 1	Lifecycle で Glacier 移行
+S3	バージョニング	有効	Object Lock 前提
+S3	Object Lock	有効（Governance）	実務向け
+S3	Compliance モード	使用しない	運用不可になるリスク
+S3	Retention	オブジェクト単位	後付け（Lambda 等）
+S3	Retention 未設定	ロックされない	Object Lock は効かない
+S3	ライフサイクル	Standard → Glacier	コスト最適化
+トラブル	Agent→Endpoint通信なし	Outbound 443 / DNS が原因	フローログで判別可能
+トラブル	Endpoint→Agentのみログあり	Agent側アウトバウンド遮断	典型障害パターン
