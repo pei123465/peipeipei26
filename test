@@ -1,18 +1,23 @@
 =LET(
-  src, A:A,
-  dom, FILTER(TRIM(src), TRIM(src)<>""),          /* 空白除去 + 前後スペース除去 */
-  u, UNIQUE(dom),                                 /* 重複削除 */
-  w, FILTER(u, LEFT(u,1)="."),                    /* ワイルドカードだけ */
-  n, FILTER(u, LEFT(u,1)<>".", ""),               /* 非ワイルドカード */
-  w_keep,
-    FILTER(
-      w,
-      BYROW(
-        w,
-        LAMBDA(x,
-          SUM(--((LEN(w)<LEN(x))*(RIGHT(x,LEN(w))=w)))=0
+  rng, A1:A1000,
+  dmy, "__DUMMY__",
+  norm, TRIM(rng),
+  dom0, FILTER(norm, norm<>"", dmy),
+  u0, UNIQUE(dom0),
+  u, FILTER(u0, u0<>dmy, dmy),
+
+  w, VSTACK(dmy, FILTER(u, LEFT(u,1)=".", dmy)),
+
+  keep,
+    BYROW(
+      u,
+      LAMBDA(d,
+        IF(LEFT(d,1)=".",
+          SUM(--((w<>dmy)*(w<>d)*(LEN(w)<LEN(d))*(RIGHT(d,LEN(w))=w)))=0,
+          TRUE
         )
       )
     ),
-  SORT(VSTACK(n, w_keep))
+
+  FILTER(u, keep, dmy)
 )
