@@ -1,0 +1,38 @@
+=LET(
+  dom_rng, A1:A1000,
+  stat_rng, B1:B1000,
+  dmy, "__DUMMY__",
+
+  norm, TRIM(dom_rng),
+
+  dom0,
+    FILTER(
+      norm,
+      (norm<>"")*
+      (norm<>"-")*
+      (stat_rng<>"無効"),
+      dmy
+    ),
+
+  u0, UNIQUE(dom0),
+  u,  FILTER(u0, u0<>dmy, dmy),
+
+  w,
+    VSTACK(
+      dmy,
+      FILTER(u, LEFT(u,1)=".", dmy)
+    ),
+
+  keep,
+    BYROW(
+      u,
+      LAMBDA(d,
+        IF(LEFT(d,1)=".",
+          SUM(--((w<>dmy)*(w<>d)*(LEN(w)<LEN(d))*(RIGHT(d,LEN(w))=w)))=0,
+          TRUE
+        )
+      )
+    ),
+
+  FILTER(u, keep, dmy)
+)
