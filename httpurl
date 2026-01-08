@@ -1,0 +1,9 @@
+=LET(
+  url, TRIM(A1:A1000),
+  st,  TRIM(B1:B1000),
+  ok,  (st="有効")*(url<>"")*(url<>"-"),
+  src, FILTER(url, ok, ""),
+  IF(src="","",
+     "^"&SUBSTITUTE(src,".","\.")
+  )
+)
