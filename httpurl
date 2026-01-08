@@ -4,7 +4,8 @@
 
   ok,  (st="有効")*(url<>"")*(url<>"-"),
 
-  src, FILTER(url, ok, ""),
+  src0, FILTER(url, ok, ""),
+  src,  UNIQUE(src0),
 
   IF(
     src="",
