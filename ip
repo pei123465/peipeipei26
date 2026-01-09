@@ -1,0 +1,16 @@
+=LET(
+  dmy, "__DUMMY__",
+
+  a_ip, TRIM(SheetA!A:A),
+  a_st, TRIM(SheetA!B:B),
+  b_ip, TRIM(SheetB!A:A),
+  b_st, TRIM(SheetB!B:B),
+
+  a0, FILTER(a_ip, (a_st="有効")*(a_ip<>"")*(a_ip<>"-"), dmy),
+  b0, FILTER(b_ip, (b_st="有効")*(b_ip<>"")*(b_ip<>"-"), dmy),
+
+  all0, VSTACK(a0, b0),
+  all1, FILTER(all0, all0<>dmy, dmy),
+
+  IF(all1=dmy, "", SORT(UNIQUE(all1)))
+)
