@@ -14,3 +14,16 @@
 
   IF(all1=dmy, "", SORT(UNIQUE(all1)))
 )
+
+=LET(
+  a_ip, TRIM(SheetA!A:A),
+  a_st, TRIM(SheetA!B:B),
+  b_ip, TRIM(SheetB!A:A),
+  b_st, TRIM(SheetB!B:B),
+
+  a_ok, FILTER(a_ip, (a_st="有効")*(a_ip<>"")*(a_ip<>"-"), ""),
+  b_ok, FILTER(b_ip, (b_st="有効")*(b_ip<>"")*(b_ip<>"-"), ""),
+
+  SORT(UNIQUE(VSTACK(a_ok, b_ok)))
+)
+
