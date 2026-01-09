@@ -1,34 +1,14 @@
 =LET(
   ip, A2,
-
-  ipn,
-    SUMPRODUCT(
-      VALUE(TEXTSPLIT(ip,"."))*
-      {256^3,256^2,256,1}
-    ),
+  ipn, SUMPRODUCT(VALUE(TEXTSPLIT(ip,".")), {256^3;256^2;256;1}),
 
   cidr, Sheet1!A$2:A$100,
   stat, Sheet1!B$2:B$100,
   ena,  Sheet1!C$2:C$100,
 
-  net,
-    SUMPRODUCT(
-      VALUE(TEXTSPLIT(TEXTBEFORE(cidr,"/"),"."))*
-      {256^3,256^2,256,1}
-    ),
+  net,  SUMPRODUCT(VALUE(TEXTSPLIT(TEXTBEFORE(cidr,"/"),".")), {256^3;256^2;256;1}),
+  size, 2^(32-VALUE(TEXTAFTER(cidr,"/"))),
 
-  size,
-    2^(32-VALUE(TEXTAFTER(cidr,"/"))),
-
-  hit,
-    SUM(
-      --(
-        (stat="済")*
-        (ena="有効")*
-        (ipn>=net)*
-        (ipn<net+size)
-      )
-    ),
-
+  hit,  SUM(--((stat="済")*(ena="有効")*(ipn>=net)*(ipn<net+size))),
   IF(hit>0,"済","未")
 )
