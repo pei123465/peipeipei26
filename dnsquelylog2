@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Enforce DNS Query Logging using Custom Config Rule and SSM Automation (Independent IAM Policies)'
+Description: 'Enforce DNS Query Logging and DNS Firewall Fail Open with Split Automation Steps'
 
 Parameters:
   DnsQueryLogConfigId:
@@ -69,6 +69,7 @@ Resources:
           - Effect: Allow
             Action:
               - 'route53resolver:AssociateResolverQueryLogConfig'
+              - 'route53resolver:UpdateResolverConfig'
               - 'ec2:DescribeVpcs'
             Resource: '*'
 
@@ -102,7 +103,6 @@ Resources:
               vpc_id = configuration_item['resourceId']
               target_config_id = os.environ['RESOLVER_QUERY_CONFIG']
               
-              # チェックロジック
               associations = resolver.list_resolver_query_log_config_associations(
                   Filters=[
                       {'Name': 'ResourceId', 'Values': [vpc_id]},
@@ -167,7 +167,8 @@ Resources:
             type: String
             default: 'False'
         mainSteps:
-          - name: EnforceDNSLogging
+          # ステップ1: DNS Query Logの関連付け
+          - name: AssociateDNSQueryLog
             action: 'aws:executeScript'
             inputs:
               Runtime: python3.11
@@ -191,6 +192,32 @@ Resources:
                         resolver.associate_resolver_query_log_config(
                             ResolverQueryLogConfigId=config_id,
                             ResourceId=vpc_id
+                        )
+                    return {'status': 'Success'}
+
+          # ステップ2: DNS Firewall Fail Open の有効化
+          - name: EnableFirewallFailOpen
+            action: 'aws:executeScript'
+            inputs:
+              Runtime: python3.11
+              Handler: main
+              InputPayload:
+                VPC_ID: '{{VpcId}}'
+                TEST_MODE: '{{TestMode}}'
+              Script: |
+                import boto3
+                def main(events, context):
+                    resolver = boto3.client('route53resolver')
+                    vpc_id = events['VPC_ID']
+                    test_mode = events['TEST_MODE']
+
+                    if test_mode == 'True':
+                        print(f"TestMode: Would enable Fail Open for {vpc_id}")
+                    else:
+                        print(f"Remediating: Enabling DNS Firewall Fail Open for {vpc_id}")
+                        resolver.update_resolver_config(
+                            ResourceId=vpc_id,
+                            FirewallFailOpen='ENABLED'
                         )
                     return {'status': 'Success'}
 
