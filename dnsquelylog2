@@ -1,0 +1,221 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Enforce DNS Query Logging using Custom Config Rule and SSM Automation (Independent IAM Policies)'
+
+Parameters:
+  DnsQueryLogConfigId:
+    Type: String
+    Description: 'The ID of the Route 53 Resolver Query Log Config (e.g., rqlc-xxxxxxxxxxxxxx)'
+
+Resources:
+  # ================================================================= #
+  # 1. Custom Config Rule Lambda 用の IAM 設定
+  # ================================================================= #
+  ConfigLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub 'DNS-Config-Lambda-Role-${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+
+  ConfigLambdaCustomPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: DNSLoggingConfigRulePolicy
+      Roles:
+        - !Ref ConfigLambdaRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'config:PutEvaluations'
+              - 'ec2:DescribeVpcs'
+              - 'route53resolver:ListResolverQueryLogConfigAssociations'
+            Resource: '*'
+
+  # ================================================================= #
+  # 2. SSM Automation 用の IAM 設定 (AutomationAssumeRole)
+  # ================================================================= #
+  AutomationAssumeRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub 'DNS-Logging-Automation-Role-${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - ssm.amazonaws.com
+                - events.amazonaws.com
+            Action: 'sts:AssumeRole'
+
+  AutomationCustomPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: DNSLoggingRemediationPolicy
+      Roles:
+        - !Ref AutomationAssumeRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'route53resolver:AssociateResolverQueryLogConfig'
+              - 'ec2:DescribeVpcs'
+            Resource: '*'
+
+  # ================================================================= #
+  # 3. Lambda 関数 & Config ルール
+  # ================================================================= #
+  DNSLoggingConfigLambda:
+    Type: 'AWS::Lambda::Function'
+    DependsOn: ConfigLambdaCustomPolicy
+    Properties:
+      FunctionName: DNS-Logging-Check-Lambda
+      Handler: index.main
+      Runtime: python3.11
+      Role: !GetAtt ConfigLambdaRole.Arn
+      Timeout: 60
+      Environment:
+        Variables:
+          RESOLVER_QUERY_CONFIG: !Ref DnsQueryLogConfigId
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import os
+
+          def main(event, context):
+              config = boto3.client('config')
+              resolver = boto3.client('route53resolver')
+              
+              invoking_event = json.loads(event['invokingEvent'])
+              configuration_item = invoking_event['configurationItem']
+              vpc_id = configuration_item['resourceId']
+              target_config_id = os.environ['RESOLVER_QUERY_CONFIG']
+              
+              # チェックロジック
+              associations = resolver.list_resolver_query_log_config_associations(
+                  Filters=[
+                      {'Name': 'ResourceId', 'Values': [vpc_id]},
+                      {'Name': 'ResolverQueryLogConfigId', 'Values': [target_config_id]}
+                  ]
+              )
+              
+              compliance_type = 'COMPLIANT' if associations['ResolverQueryLogConfigAssociations'] else 'NON_COMPLIANT'
+              
+              config.put_evaluations(
+                  Evaluations=[
+                      {
+                          'ComplianceResourceType': configuration_item['resourceType'],
+                          'ComplianceResourceId': vpc_id,
+                          'ComplianceType': compliance_type,
+                          'OrderingTimestamp': configuration_item['configurationItemCaptureTime']
+                      },
+                  ],
+                  ResultToken=event['resultToken']
+              )
+
+  ConfigLambdaPermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      FunctionName: !GetAtt DNSLoggingConfigLambda.Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: 'config.amazonaws.com'
+
+  DNSLoggingConfigRule:
+    Type: 'AWS::Config::ConfigRule'
+    DependsOn: ConfigLambdaPermission
+    Properties:
+      ConfigRuleName: DNS-Query-Logging-Enforcement-Rule
+      Source:
+        Owner: CUSTOM_LAMBDA
+        SourceIdentifier: !GetAtt DNSLoggingConfigLambda.Arn
+        SourceDetails:
+          - EventSource: aws.config
+            MessageType: ConfigurationItemChangeNotification
+      Scope:
+        ComplianceResourceTypes:
+          - 'AWS::EC2::VPC'
+
+  # ================================================================= #
+  # 4. SSM Automation Document & Auto Remediation
+  # ================================================================= #
+  DNSLoggingRemediationDocument:
+    Type: 'AWS::SSM::Document'
+    Properties:
+      DocumentType: Automation
+      Name: EnforceDNSQueryLoggingRemediation
+      Content:
+        schemaVersion: '0.3'
+        assumeRole: !GetAtt AutomationAssumeRole.Arn
+        parameters:
+          VpcId:
+            type: String
+          DnsQueryConfig:
+            type: String
+            default: !Ref DnsQueryLogConfigId
+          TestMode:
+            type: String
+            default: 'False'
+        mainSteps:
+          - name: EnforceDNSLogging
+            action: 'aws:executeScript'
+            inputs:
+              Runtime: python3.11
+              Handler: main
+              InputPayload:
+                VPC_ID: '{{VpcId}}'
+                RESOLVER_QUERY_CONFIG: '{{DnsQueryConfig}}'
+                TEST_MODE: '{{TestMode}}'
+              Script: |
+                import boto3
+                def main(events, context):
+                    resolver = boto3.client('route53resolver')
+                    vpc_id = events['VPC_ID']
+                    config_id = events['RESOLVER_QUERY_CONFIG']
+                    test_mode = events['TEST_MODE']
+
+                    if test_mode == 'True':
+                        print(f"TestMode: Would associate {vpc_id} with {config_id}")
+                    else:
+                        print(f"Remediating: Associating {vpc_id} with {config_id}")
+                        resolver.associate_resolver_query_log_config(
+                            ResolverQueryLogConfigId=config_id,
+                            ResourceId=vpc_id
+                        )
+                    return {'status': 'Success'}
+
+  DNSLoggingRemediationConfiguration:
+    Type: 'AWS::Config::RemediationConfiguration'
+    DependsOn: AutomationCustomPolicy
+    Properties:
+      ConfigRuleName: !Ref DNSLoggingConfigRule
+      ResourceType: 'AWS::EC2::VPC'
+      TargetId: !Ref DNSLoggingRemediationDocument
+      TargetType: SSM_AUTOMATION
+      Automatic: True
+      MaximumAutomaticAttempts: 5
+      RetryAttemptSeconds: 60
+      Parameters:
+        VpcId:
+          ResourceValue:
+            Value: RESOURCE_ID
+        DnsQueryConfig:
+          StaticValue:
+            Values:
+              - !Ref DnsQueryLogConfigId
+
+Outputs:
+  ConfigRuleArn:
+    Value: !GetAtt DNSLoggingConfigRule.Arn
+  AutomationRoleArn:
+    Value: !GetAtt AutomationAssumeRole.Arn
